@@ -23,6 +23,19 @@ const YT_LINK = /(?<![a-z0-9.-])(?:https?:\/\/)?(?:[a-z0-9-]+\.)*(?:youtube\.com
 export const looksLikeYouTubeLink = (input: string) => YT_LINK.test(input);
 
 /**
+ * The playlist ID from a YouTube link with ?list=..., or null. Auto-generated mixes (RD...)
+ * and personal lists (Watch Later, Liked) are skipped: the API can't read them.
+ */
+export function parsePlaylistId(input: string): string | null {
+  const found = input.trim().match(YT_LINK)?.[0];
+  if (!found) return null;
+  try {
+    const list = new URL(/^https?:\/\//i.test(found) ? found : 'https://' + found).searchParams.get('list');
+    return list && /^[A-Za-z0-9_-]{10,64}$/.test(list) && !/^(RD|UL)/.test(list) ? list : null;
+  } catch { return null; }
+}
+
+/**
  * Accepts a bare 11-char ID or any YouTube link, also one copied together with other text
  * (e.g. from a phone's share sheet) or without https://. Returns the video ID or null.
  */

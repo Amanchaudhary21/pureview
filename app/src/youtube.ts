@@ -1,6 +1,6 @@
 import { AppError } from './errors';
 import type { Video } from './types';
-import { looksLikeYouTubeLink, parseYouTubeId } from './validation';
+import { looksLikeYouTubeLink, parsePlaylistId, parseYouTubeId } from './validation';
 
 // YouTube search, shared by the browser-storage backend and the MySQL server.
 
@@ -36,7 +36,13 @@ export async function searchYouTube(query: string, getKey: () => Promise<string 
   if (!q) throw new AppError('PV-SEARCH-001', 'Search is empty.');
 
   // check for a link before the length limit: copied links are often long
+  const listId = parsePlaylistId(q);
   const id = parseYouTubeId(q);
+  if (listId) { // playlist link: list all of its videos (needs the API key)
+    const key = await getKey();
+    if (key) return playlistVideos(listId, key);
+    if (!id) throw new AppError('PV-SEARCH-KEY', 'Add a YouTube Data API key in Settings to open a whole playlist.');
+  }
   if (id) { // pasted link: no API key needed
     let title = `YouTube video ${id}`, channel: string | null = null;
     try {
@@ -47,7 +53,7 @@ export async function searchYouTube(query: string, getKey: () => Promise<string 
       thumbnail_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, duration: null, video_url: `https://www.youtube.com/watch?v=${id}` }];
   }
   if (looksLikeYouTubeLink(q))
-    throw new AppError('PV-SEARCH-LINK', 'That YouTube link is not a single video (it may be a playlist or channel). Open a video and copy its link.');
+    throw new AppError('PV-SEARCH-LINK', 'That YouTube link is not a video or playlist (it may be a channel or a mix). Open a video or playlist and copy its link.');
   if (q.length > 200) throw new AppError('PV-SEARCH-002', 'Search is too long.');
 
   const key = await getKey();
@@ -66,6 +72,33 @@ export async function searchYouTube(query: string, getKey: () => Promise<string 
   if (searchCache.size > 50) searchCache.clear();
   searchCache.set(q.toLowerCase(), { t: Date.now(), data: out });
   return out;
+}
+
+const MAX_PLAYLIST = 200;
+
+async function playlistVideos(listId: string, key: string): Promise<Video[]> {
+  const hit = searchCache.get('list:' + listId);
+  if (hit && Date.now() - hit.t < 10 * 60_000) return hit.data;
+  const out: Video[] = [];
+  let page = '';
+  do {
+    const j = await fetchJson(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${encodeURIComponent(listId)}&key=${encodeURIComponent(key)}${page && '&pageToken=' + encodeURIComponent(page)}`)
+      .catch(e => { throw e instanceof AppError && e.code === 'PV-NET-404' ? new AppError('PV-SEARCH-LIST', 'That playlist was not found or is private.') : e; });
+    for (const i of j.items ?? []) {
+      const vid = i?.snippet?.resourceId?.videoId;
+      // deleted and private videos stay in playlists but can't be played
+      if (!vid || !i.snippet.thumbnails || out.some(v => v.video_id === vid)) continue;
+      out.push({ platform: 'youtube', video_id: vid, title: decodeEntities(i.snippet.title ?? ''),
+        channel_name: decodeEntities(i.snippet.videoOwnerChannelTitle ?? i.snippet.channelTitle ?? ''),
+        thumbnail_url: i.snippet.thumbnails.medium?.url ?? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`,
+        duration: null, video_url: `https://www.youtube.com/watch?v=${vid}` });
+    }
+    page = j.nextPageToken ?? '';
+  } while (page && out.length < MAX_PLAYLIST);
+  const data = out.slice(0, MAX_PLAYLIST);
+  if (searchCache.size > 50) searchCache.clear();
+  searchCache.set('list:' + listId, { t: Date.now(), data });
+  return data;
 }
 
 export const API_KEY_RE = /^[A-Za-z0-9_-]{20,80}$/;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { looksLikeYouTubeLink, parseYouTubeId, VideoSchema, PlaylistSchema } from '../../src/validation';
+import { looksLikeYouTubeLink, parsePlaylistId, parseYouTubeId, VideoSchema, PlaylistSchema } from '../../src/validation';
 
 describe('parseYouTubeId', () => {
   it('parses common URL shapes', () => {
@@ -36,6 +36,13 @@ describe('parseYouTubeId', () => {
     expect(parseYouTubeId('https://youtube.com.evil.com/watch?v=dQw4w9WgXcQ')).toBeNull();
     expect(parseYouTubeId('https://www.youtube.com/playlist?list=PLabc')).toBeNull();
     expect(parseYouTubeId('https://youtu.be/dQw4w9WgXcQextra')).toBeNull();
+  });
+  it('finds playlist IDs', () => {
+    expect(parsePlaylistId('https://www.youtube.com/playlist?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG')).toBe('PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG');
+    expect(parsePlaylistId('youtube.com/watch?v=dQw4w9WgXcQ&list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG&index=2')).toBe('PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG');
+    expect(parsePlaylistId('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ')).toBeNull(); // mix
+    expect(parsePlaylistId('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBeNull();
+    expect(parsePlaylistId('https://evil.com/playlist?list=PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG')).toBeNull();
   });
   it('recognises non-video YouTube links', () => {
     expect(looksLikeYouTubeLink('https://www.youtube.com/@somechannel')).toBe(true);
