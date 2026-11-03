@@ -85,20 +85,27 @@ export const backend: PvApi = {
 
   play: video => handle('video:play', () => {
     const d = load(); const id = upsertVideo(d, video);
+    // one entry per video: re-watching moves it to the top
+    d.history = d.history.filter(h => h.video_id !== id);
     d.history.unshift({ id: nextId(d), video_id: id, watched_at: now() });
     save(d); return id;
   }),
 
   history: {
     list: () => handle('history:list', () => {
-      const d = load();
-      return d.history.slice(0, 200).flatMap(h => {
+      const d = load(), seen = new Set<number>();
+      return d.history.flatMap(h => {
         const v = videoById(d, h.video_id);
-        return v ? [{ ...v, hid: h.id, watched_at: h.watched_at }] : [];
-      });
+        if (!v || seen.has(h.video_id)) return [];
+        seen.add(h.video_id);
+        return [{ ...v, hid: h.id, watched_at: h.watched_at }];
+      }).slice(0, 200);
     }),
     clear: () => handle('history:clear', () => { const d = load(); d.history = []; save(d); return true; }),
-    remove: hid => handle('history:remove', () => { const d = load(); d.history = d.history.filter(h => h.id !== Number(hid)); save(d); return true; })
+    remove: hid => handle('history:remove', () => {
+      const d = load(), vid = d.history.find(h => h.id === Number(hid))?.video_id;
+      d.history = d.history.filter(h => h.id !== Number(hid) && h.video_id !== vid); save(d); return true;
+    })
   },
 
   fav: {

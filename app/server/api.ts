@@ -33,14 +33,24 @@ export const handlers: Record<string, Handler> = {
 
   play: async video => {
     const id = await upsertVideo(video);
+    // one entry per video: re-watching moves it to the top
+    await run('DELETE FROM history WHERE video_id=?', [id]);
     await run('INSERT INTO history(video_id,watched_at) VALUES(?,?)', [id, new Date()]);
     return id;
   },
 
-  'history.list': async () => (await rows(`SELECT ${VIDEO_COLS}, h.id hid, h.watched_at FROM history h JOIN videos v ON v.id=h.video_id
-    ORDER BY h.watched_at DESC, h.id DESC LIMIT 200`)).map(r => ({ ...r, watched_at: iso(r.watched_at) })),
+  'history.list': async () => {
+    const seen = new Set<number>();
+    return (await rows<any>(`SELECT ${VIDEO_COLS}, h.id hid, h.watched_at FROM history h JOIN videos v ON v.id=h.video_id
+      ORDER BY h.watched_at DESC, h.id DESC`))
+      .filter(r => !seen.has(r.id) && seen.add(r.id)).slice(0, 200)
+      .map(r => ({ ...r, watched_at: iso(r.watched_at) }));
+  },
   'history.clear': async () => { await run('DELETE FROM history'); return true; },
-  'history.remove': async hid => { await run('DELETE FROM history WHERE id=?', [Number(hid)]); return true; },
+  'history.remove': async hid => {
+    await run('DELETE h FROM history h JOIN history t ON t.video_id=h.video_id WHERE t.id=?', [Number(hid)]);
+    return true;
+  },
 
   'fav.list': () => rows<Video>(`SELECT ${VIDEO_COLS} FROM favorites f JOIN videos v ON v.id=f.video_id ORDER BY f.created_at DESC, f.id DESC`),
   'fav.has': async (platform, vid) =>

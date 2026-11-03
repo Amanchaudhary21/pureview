@@ -24,9 +24,17 @@ describe('backend', () => {
     await ok(backend.play(vid()));
     await ok(backend.play(vid({ title: null, channel_name: null })));
     const h = await ok(backend.history.list());
-    expect(h).toHaveLength(2);
+    expect(h).toHaveLength(1);
     expect(h[0].title).toBe('Song');
     expect(h[0].channel_name).toBe('Rick');
+  });
+
+  it('keeps one history entry per video, most recent first', async () => {
+    await ok(backend.play(vid({ video_id: 'aaaaaaaaaaa', video_url: 'https://www.youtube.com/watch?v=aaaaaaaaaaa' })));
+    await ok(backend.play(vid()));
+    const h = await ok(backend.history.list());
+    expect(h.map(v => v.video_id)).toEqual(['dQw4w9WgXcQ', 'aaaaaaaaaaa']);
+    await ok(backend.history.remove(h[1].hid!));
   });
 
   it('toggles favorites', async () => {
@@ -51,7 +59,7 @@ describe('backend', () => {
     expect(json).not.toContain('AIzaSy');
     await ok(backend.history.clear());
     await ok(backend.settings.importData(json));
-    expect(await ok(backend.history.list())).toHaveLength(2);
+    expect(await ok(backend.history.list())).toHaveLength(1);
     expect((await ok(backend.settings.get())).hasApiKey).toBe(true);
     expect((await backend.settings.importData('{"nope":1}')).ok).toBe(false);
   });
