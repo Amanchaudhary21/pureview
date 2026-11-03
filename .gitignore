@@ -1,0 +1,7 @@
+node_modules/
+dist/
+release/
+*.log
+.env*
+# design document, kept out of the public repo
+*.pdf
