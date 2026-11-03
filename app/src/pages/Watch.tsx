@@ -52,7 +52,8 @@ export default function Watch() {
         </select>
         <button className="ghost" onClick={() => unwrap(pv().openExternal(video.video_url)).catch(e => show((e as Error).message, 'err'))}>Open on YouTube</button>
       </div>
-      <p className="sub">Playback uses YouTube's official player, so YouTube's own ads and rules apply.</p>
+      <p className="sub">Playback uses YouTube's official player, so YouTube's own ads and rules apply.
+        If the player says the video is unavailable, its owner has turned off playback on other sites. Use "Open on YouTube".</p>
     </>
   );
 }

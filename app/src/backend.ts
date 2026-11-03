@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { LogRow, Playlist, PvApi, Result, Video } from './types';
-import { PlaylistSchema, VideoSchema, parseYouTubeId } from './validation';
+import { PlaylistSchema, VideoSchema, looksLikeYouTubeLink, parseYouTubeId } from './validation';
 
 // All data lives in this browser's localStorage. Nothing is sent anywhere except
 // YouTube/Google API requests made directly from the browser.
@@ -119,8 +119,8 @@ const decodeEntities = (s: string) => s.replace(/&amp;/g, '&').replace(/&quot;/g
 async function searchVideos(query: string): Promise<Video[]> {
   const q = query.trim();
   if (!q) throw new AppError('PV-SEARCH-001', 'Search is empty.');
-  if (q.length > 200) throw new AppError('PV-SEARCH-002', 'Search is too long.');
 
+  // check for a link before the length limit: copied links are often long
   const id = parseYouTubeId(q);
   if (id) { // pasted link: no API key needed
     let title = `YouTube video ${id}`, channel: string | null = null;
@@ -131,6 +131,9 @@ async function searchVideos(query: string): Promise<Video[]> {
     return [{ platform: 'youtube', video_id: id, title, channel_name: channel,
       thumbnail_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, duration: null, video_url: `https://www.youtube.com/watch?v=${id}` }];
   }
+  if (looksLikeYouTubeLink(q))
+    throw new AppError('PV-SEARCH-LINK', 'That YouTube link is not a single video (it may be a playlist or channel). Open a video and copy its link.');
+  if (q.length > 200) throw new AppError('PV-SEARCH-002', 'Search is too long.');
 
   const key = load().settings.youtube_api_key;
   if (!key) throw new AppError('PV-SEARCH-KEY', 'Add a YouTube Data API key in Settings to search. (You can still paste a YouTube link.)');

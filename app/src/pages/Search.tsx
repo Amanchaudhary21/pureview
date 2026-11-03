@@ -1,10 +1,12 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { pv, unwrap } from '../api';
 import type { Video } from '../types';
-import VideoCard, { Empty, Grid } from '../components/VideoCard';
+import { parseYouTubeId } from '../validation';
+import VideoCard, { Empty, Grid, watchLink } from '../components/VideoCard';
 
 export default function Search() {
+  const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const initial = params.get('q') ?? '';
   const [q, setQ] = useState(initial);
@@ -16,10 +18,15 @@ export default function Search() {
     setErr(''); 
     if (!term.trim()) { setErr('Type something to search.'); return; }
     setLoading(true);
-    try { setRes(await unwrap(pv().search(term))); }
+    try {
+      const found = await unwrap(pv().search(term));
+      // a pasted video link: go straight to the player
+      if (found.length === 1 && parseYouTubeId(term)) { nav(watchLink(found[0]), { replace: true, state: { video: found[0] } }); return; }
+      setRes(found);
+    }
     catch (e) { setRes(null); setErr((e as Error).message); }
     finally { setLoading(false); }
-  }, []);
+  }, [nav]);
   useEffect(() => {
     setQ(initial);
     if (initial) void run(initial);
