@@ -1,2 +1,5 @@
 node_modules
 dist
+dist-mysql
+# MySQL login
+server/.env

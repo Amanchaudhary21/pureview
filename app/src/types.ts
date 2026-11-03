@@ -4,7 +4,7 @@ export interface Video {
 }
 export interface Playlist { id: number; name: string; description: string | null; count: number }
 export type Result<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
-export interface SettingsInfo { hasApiKey: boolean; theme: string }
+export interface SettingsInfo { hasApiKey: boolean; theme: string; storage: 'browser' | 'mysql' }
 export interface LogRow { id: number; error_id: string; module: string; severity: string; message: string; created_at: string }
 
 export interface PvApi {

@@ -12,6 +12,7 @@ export default defineConfig({
   // relative paths + HashRouter so the build works under any sub-path (e.g. GitHub Pages /repo-name/)
   base: './',
   build: { outDir: 'dist' },
-  server: { port: 5173, strictPort: true },
+  // in mysql mode the page calls /api, which goes to the local server (server/index.ts)
+  server: { port: 5173, strictPort: true, proxy: { '/api': 'http://127.0.0.1:3001' } },
   test: { include: ['tests/**/*.test.ts'] }
 } as any);

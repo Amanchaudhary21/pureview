@@ -2,6 +2,8 @@ node_modules/
 dist/
 release/
 *.log
-.env*
+.env
+.env.*
+!.env.example
 # design document, kept out of the public repo
 *.pdf

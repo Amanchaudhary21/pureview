@@ -37,16 +37,18 @@ export default function Settings() {
   const showLogs = () => unwrap(pv().settings.logs()).then(setLogs).catch(err);
 
   if (!s) return <p>Loading…</p>;
+  const mysql = s.storage === 'mysql';
+  const where = mysql ? 'in the MySQL database on this PC' : 'in this browser';
   return (
     <>
       <h1>Settings</h1>
       <section className="panel"><h2>YouTube search</h2>
-        <p className="sub">Status: {s.hasApiKey ? 'API key saved in this browser (never shown again)' : 'no key. Pasting a video link still works.'}</p>
+        <p className="sub">Status: {s.hasApiKey ? `API key saved ${where} (never shown again)` : 'no key. Pasting a video link still works.'}</p>
         <form className="searchbar" onSubmit={saveKey}>
           <input type="password" value={key} onChange={e => setKey(e.target.value)} placeholder="YouTube Data API v3 key" autoComplete="off" aria-label="API key" />
           <button disabled={!key && !s.hasApiKey}>{key ? 'Save' : 'Remove key'}</button>
         </form>
-        <p className="sub">Create a free key in Google Cloud Console → enable "YouTube Data API v3". The key is stored only in this browser and sent only to Google. Restrict it to this website's address in the console.</p>
+        <p className="sub">Create a free key in Google Cloud Console → enable "YouTube Data API v3". The key is stored only {where} and sent only to Google.{!mysql && " Restrict it to this website's address in the console."}</p>
       </section>
 
       <section className="panel"><h2>Appearance</h2>
@@ -64,7 +66,8 @@ export default function Settings() {
           <button className="ghost" onClick={showLogs}>Show error log</button>
         </div>
         {logs.length > 0 && <pre className="log">{logs.map(l => `${l.created_at}  ${l.severity}  ${l.error_id}  ${l.module}: ${l.message}`).join('\n')}</pre>}
-        <p className="sub">Your history, favorites and playlists are saved in this browser only. Clearing site data deletes them, so download a backup now and then.</p>
+        <p className="sub">Storage: <strong>{mysql ? 'MySQL (this PC)' : 'this browser'}</strong>. Your history, favorites and playlists are saved {where}.
+          {mysql ? ' Backups use the same file format as the website, so you can move data between them.' : ' Clearing site data deletes them, so download a backup now and then.'}</p>
       </section>
       <p className="sub">PUREVIEW 1.0.0</p>
     </>

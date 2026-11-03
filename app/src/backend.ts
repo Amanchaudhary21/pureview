@@ -1,24 +1,16 @@
 import { z } from 'zod';
-import type { LogRow, Playlist, PvApi, Result, Video } from './types';
-import { PlaylistSchema, VideoSchema, looksLikeYouTubeLink, parseYouTubeId } from './validation';
+import type { Playlist, PvApi, Result } from './types';
+import { PlaylistSchema, VideoSchema } from './validation';
+import { AppError } from './errors';
+import { DataSchema, type Data } from './backup';
+import { API_KEY_RE, clearSearchCache, searchYouTube } from './youtube';
 
 // All data lives in this browser's localStorage. Nothing is sent anywhere except
 // YouTube/Google API requests made directly from the browser.
 const KEY = 'pureview:v1';
 
-type StoredVideo = Omit<Video, 'item_id' | 'hid' | 'watched_at'> & { id: number };
-interface Data {
-  seq: number;
-  videos: StoredVideo[];
-  history: { id: number; video_id: number; watched_at: string }[];
-  favorites: { video_id: number; created_at: string }[];
-  playlists: { id: number; name: string; description: string | null; created_at: string }[];
-  playlist_items: { id: number; playlist_id: number; video_id: number; position: number }[];
-  settings: Record<string, string>;
-  logs: LogRow[];
-}
-
-const DataSchema = z.object({
+// loose on purpose: a stored blob that fails a strict check must not be thrown away
+const StoredSchema = z.object({
   seq: z.number().int().nonnegative(),
   videos: z.array(z.any()), history: z.array(z.any()), favorites: z.array(z.any()),
   playlists: z.array(z.any()), playlist_items: z.array(z.any()),
@@ -34,7 +26,7 @@ function load(): Data {
   if (cache) return cache;
   try {
     const raw = localStorage.getItem(KEY);
-    const parsed = raw ? DataSchema.safeParse(JSON.parse(raw)) : null;
+    const parsed = raw ? StoredSchema.safeParse(JSON.parse(raw)) : null;
     cache = parsed?.success ? (parsed.data as Data) : empty();
   } catch { cache = empty(); }
   return cache;
@@ -49,8 +41,6 @@ function save(d: Data) {
   catch { throw new AppError('PV-STORE-FULL', 'Browser storage is full. Clear some history and try again.'); }
 }
 const nextId = (d: Data) => ++d.seq;
-
-class AppError extends Error { constructor(public code: string, message: string) { super(message); } }
 
 function log(module: string, severity: string, message: string, id = 'PV-GEN-000') {
   try {
@@ -89,73 +79,9 @@ function upsertVideo(d: Data, raw: unknown): number {
 }
 const videoById = (d: Data, id: number) => d.videos.find(v => v.id === id);
 
-// ---------- network ----------
-async function fetchJson(url: string, tries = 3): Promise<any> {
-  let delay = 1000;
-  for (let i = 0; i < tries; i++) {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 10000);
-    try {
-      const r = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(t);
-      if (r.ok) return await r.json();
-      if (r.status === 403) throw new AppError('PV-NET-403', 'YouTube API: access denied or quota exceeded. Check your API key and its website restrictions.');
-      if (r.status === 400) throw new AppError('PV-NET-400', 'YouTube API: bad request (is the API key valid?)');
-      if (r.status === 401 || r.status === 404) throw new AppError(`PV-NET-${r.status}`, `Request failed (${r.status})`);
-      if (i === tries - 1) throw new AppError(`PV-NET-${r.status}`, `Server error (${r.status}). Try again later.`);
-    } catch (err) {
-      clearTimeout(t);
-      if (err instanceof AppError) throw err;
-      if (i === tries - 1) throw new AppError('PV-NET-OFFLINE', 'Network unavailable or request timed out.');
-    }
-    await new Promise(r => setTimeout(r, delay)); delay *= 2;
-  }
-  throw new AppError('PV-NET-000', 'Request failed');
-}
-
-const searchCache = new Map<string, { t: number; data: Video[] }>();
-const decodeEntities = (s: string) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-
-async function searchVideos(query: string): Promise<Video[]> {
-  const q = query.trim();
-  if (!q) throw new AppError('PV-SEARCH-001', 'Search is empty.');
-
-  // check for a link before the length limit: copied links are often long
-  const id = parseYouTubeId(q);
-  if (id) { // pasted link: no API key needed
-    let title = `YouTube video ${id}`, channel: string | null = null;
-    try {
-      const o = await fetchJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent('https://www.youtube.com/watch?v=' + id)}`, 1);
-      title = o.title ?? title; channel = o.author_name ?? null;
-    } catch { /* keep fallback title */ }
-    return [{ platform: 'youtube', video_id: id, title, channel_name: channel,
-      thumbnail_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, duration: null, video_url: `https://www.youtube.com/watch?v=${id}` }];
-  }
-  if (looksLikeYouTubeLink(q))
-    throw new AppError('PV-SEARCH-LINK', 'That YouTube link is not a single video (it may be a playlist or channel). Open a video and copy its link.');
-  if (q.length > 200) throw new AppError('PV-SEARCH-002', 'Search is too long.');
-
-  const key = load().settings.youtube_api_key;
-  if (!key) throw new AppError('PV-SEARCH-KEY', 'Add a YouTube Data API key in Settings to search. (You can still paste a YouTube link.)');
-  const hit = searchCache.get(q.toLowerCase());
-  if (hit && Date.now() - hit.t < 10 * 60_000) return hit.data;
-
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=24&safeSearch=moderate&q=${encodeURIComponent(q)}&key=${encodeURIComponent(key)}`;
-  const j = await fetchJson(url);
-  const out: Video[] = (j.items ?? []).filter((i: any) => i?.id?.videoId).map((i: any) => ({
-    platform: 'youtube', video_id: i.id.videoId, title: decodeEntities(i.snippet?.title ?? ''),
-    channel_name: decodeEntities(i.snippet?.channelTitle ?? ''),
-    thumbnail_url: i.snippet?.thumbnails?.medium?.url ?? `https://i.ytimg.com/vi/${i.id.videoId}/mqdefault.jpg`,
-    duration: null, video_url: `https://www.youtube.com/watch?v=${i.id.videoId}`
-  }));
-  if (searchCache.size > 50) searchCache.clear();
-  searchCache.set(q.toLowerCase(), { t: Date.now(), data: out });
-  return out;
-}
-
 // ---------- api ----------
 export const backend: PvApi = {
-  search: q => handle('search', () => searchVideos(String(q))),
+  search: q => handle('search', () => searchYouTube(String(q), async () => load().settings.youtube_api_key)),
 
   play: video => handle('video:play', () => {
     const d = load(); const id = upsertVideo(d, video);
@@ -230,13 +156,13 @@ export const backend: PvApi = {
   },
 
   settings: {
-    get: () => handle('settings:get', () => { const s = load().settings; return { hasApiKey: !!s.youtube_api_key, theme: s.theme ?? 'dark' }; }),
+    get: () => handle('settings:get', () => { const s = load().settings; return { hasApiKey: !!s.youtube_api_key, theme: s.theme ?? 'dark', storage: 'browser' as const }; }),
     setApiKey: k => handle('settings:setApiKey', () => {
       const key = String(k).trim();
-      if (key && !/^[A-Za-z0-9_-]{20,80}$/.test(key)) throw new AppError('PV-SET-001', 'That does not look like a valid API key.');
+      if (key && !API_KEY_RE.test(key)) throw new AppError('PV-SET-001', 'That does not look like a valid API key.');
       const d = load();
       if (key) d.settings.youtube_api_key = key; else delete d.settings.youtube_api_key;
-      save(d); searchCache.clear(); return true;
+      save(d); clearSearchCache(); return true;
     }),
     set: (k, v) => handle('settings:set', () => {
       if (k !== 'theme' || !['dark', 'light'].includes(v)) throw new AppError('PV-SET-002', 'Unknown setting');
